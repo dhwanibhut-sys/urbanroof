@@ -1,6 +1,5 @@
 import os
 import json
-import base64
 from pydantic import BaseModel, Field
 from typing import List
 from groq import Groq
@@ -21,10 +20,6 @@ class DDRResult(BaseModel):
     additional_notes: str = Field(description="Any additional notes or factors.")
     missing_information: str = Field(description="Explicitly detail missing or unclear information, specify 'Not Available' if something expected is missing.")
 
-def encode_image(image_path):
-    with open(image_path, "rb") as image_file:
-        return base64.b64encode(image_file.read()).decode('utf-8')
-
 def process_with_gemini(api_key: str, inspection_text: str, thermal_text: str, image_paths: List[str]) -> dict:
     """This function is kept named 'process_with_gemini' for backward compatibility in app.py, but now calls Groq."""
     
@@ -36,19 +31,16 @@ def process_with_gemini(api_key: str, inspection_text: str, thermal_text: str, i
     prompt = f"""
 You are an expert Civil Engineer, Master Thermographer, and Technical Diagnostic Report Generator.
 You are given the extracted text from two documents: an Inspection Report and a Thermal Report.
-We have also extracted images with markers in the text (e.g. [IMAGE_REFERENCE: filename]).
-You HAVE access to the high-resolution visual contents of the actual images themselves.
+Crucially, during text extraction, we inserted markers such as [IMAGE_REFERENCE: filename] exactly where images appeared in the original documents.
 
-Your objective is to assimilate both sources of data, perform deep visual analysis on the real-world images over text, and generate a complete Detailed Diagnostic Report (DDR) in valid JSON format.
+Your objective is to assimilate both sources of data, logically link the text observations with their nearby image references, and generate a complete Detailed Diagnostic Report (DDR) in valid JSON format.
 
-Important Rules for Image Processing:
-1. DEEP VISUAL ANALYSIS: Assume the images are real-world site evidence. Look VERY closely for visual nuances:
-   - Identify water damage, pooling, peeling paint, blockages, rust, or structural cracks in visual images.
-   - Look for sharp temperature gradients, thermal bridging, and suspected heat loss or subsurface water in thermal (IR) scans.
-2. COMBINE DATA: Intelligently cross-reference the visual defects you see with the extracted text. If an image clearly shows an issue (like a massive crack), state it confidently and use it to clarify vague text.
-3. Treat the images as primary sources of truth! If the text says "looks okay visually" but the image shows a defect, prioritize the visual evidence and note the discrepancy.
+Important Rules for Processing:
+1. COMBINE DATA: Intelligently cross-reference the defects described in the text with the nearest [IMAGE_REFERENCE: filename]. 
+2. If the text mentions a defect (e.g. "massive crack") and an [IMAGE_REFERENCE: insp_crack.jpg] appears near it, you MUST assign that filename to the relevant_image_filenames list for that exact observation.
+3. Treat the [IMAGE_REFERENCE: filename] markers as contextual visual evidence locations.
 4. Avoid duplicate points.
-5. If information conflicts between text and images -> mention the conflict explicitly. 
+5. If information conflicts -> mention the conflict explicitly. 
 6. If expected information is missing -> write "Not Available".
 7. Use simple, client-friendly language. Avoid unnecessary technical jargon.
 8. Accurately map relevant image filenames to their exact observations. Do NOT attach images to unrelated observations.
@@ -83,52 +75,20 @@ Output the data strictly adhering to the following JSON structure exactly:
 }}
     """
     
-    # Construct Multimodal Messages
-    content_list = [{"type": "text", "text": prompt}]
-    
-    mapping_text = "\n\n--- IMAGE ATTACHMENT MAPPING ---\n"
-    for idx, img_path in enumerate(image_paths):
-        if os.path.exists(img_path):
-            base64_image = encode_image(img_path)
-            
-            # Determine extension
-            ext = os.path.splitext(img_path)[1].lower().replace(".", "")
-            if ext == "jpg": ext = "jpeg"
-            if ext not in ["jpeg", "png", "gif", "webp"]:
-                ext = "png" # fallback default
-            
-            img_filename = os.path.basename(img_path)
-            mapping_text += f"- Visual Attachment #{idx + 1} corresponds to filename: {img_filename}\n"
-            
-            content_list.append({
-                "type": "image_url",
-                "image_url": {
-                    "url": f"data:image/{ext};base64,{base64_image}"
-                }
-            })
-    
-    content_list[0]["text"] += mapping_text
-
     response = client.chat.completions.create(
         messages=[
             {
                 "role": "user",
-                "content": content_list,
+                "content": prompt,
             }
         ],
-        model="llama-3.2-90b-vision-preview",
+        model="llama-3.3-70b-versatile",
         temperature=0.1,
         max_completion_tokens=2048,
+        response_format={"type": "json_object"}
     )
     
-    response_content = response.choices[0].message.content
     try:
-        # Llama 3.2 vision might wrap output in ```json ... ``` since response_format JSON obj is unsupported currently for multimodal on groq in some edges cases
-        if "```json" in response_content:
-            response_content = response_content.split("```json")[1].split("```")[0].strip()
-        elif "```" in response_content:
-            response_content = response_content.split("```")[1].strip()
-            
-        return json.loads(response_content)
+        return json.loads(response.choices[0].message.content)
     except Exception as e:
         return {"error": f"Failed to parse Groq JSON: {str(e)}", "raw": response.choices[0].message.content}

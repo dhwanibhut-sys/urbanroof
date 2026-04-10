@@ -23,7 +23,7 @@ st.markdown("Upload Inspection and Thermal data to synthesize a standardized dia
 
 # API Key input
 api_key = st.sidebar.text_input("Enter your Groq API Key", type="password")
-st.sidebar.markdown("Core Processing Engine: `llama-3.2-90b-vision-preview`")
+st.sidebar.markdown("Core Processing Engine: `llama-3.3-70b-versatile`")
 
 col1, col2 = st.columns(2)
 with col1:
