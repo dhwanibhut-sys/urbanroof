@@ -21,8 +21,19 @@ st.markdown("""
 st.title("Detailed Diagnostic Report System")
 st.markdown("Upload Inspection and Thermal data to synthesize a standardized diagnostic report.")
 
+import os
+try:
+    with open(os.path.join(os.path.dirname(__file__), 'config.py'), 'r') as f:
+        API_KEY = f.read().split('=')[1].strip().strip('\"').strip('\'')
+except Exception as e:
+    API_KEY = ""
+
 # API Key input
-api_key = st.sidebar.text_input("Enter your Groq API Key", type="password")
+api_key = API_KEY
+if not api_key:
+    api_key = st.sidebar.text_input("Enter your Groq API Key", type="password")
+else:
+    st.sidebar.success("✅ Secure Groq API Key Loaded Internally")
 st.sidebar.markdown("Core Processing Engine: `llama-3.3-70b-versatile`")
 
 col1, col2 = st.columns(2)
